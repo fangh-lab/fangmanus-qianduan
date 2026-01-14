@@ -1,0 +1,247 @@
+:root {
+  --bg: #0b1220;
+  --panel: #111a2e;
+  --muted: #93a4c7;
+  --text: #e9f0ff;
+  --border: rgba(255, 255, 255, 0.08);
+  --primary: #4f7cff;
+  --primary2: #2dd4bf;
+  --danger: #ef4444;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+    Arial, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: radial-gradient(1200px 800px at 20% 0%, rgba(79, 124, 255, 0.25), transparent 55%),
+    radial-gradient(900px 600px at 80% 20%, rgba(45, 212, 191, 0.18), transparent 50%),
+    var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.header {
+  padding: 16px 16px 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(17, 26, 46, 0.7);
+  backdrop-filter: blur(8px);
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.subtitle {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(17, 26, 46, 0.7);
+  backdrop-filter: blur(8px);
+  min-height: 200px;
+}
+
+h2 {
+  font-size: 14px;
+  margin: 0 0 10px 0;
+  color: rgba(233, 240, 255, 0.9);
+  letter-spacing: 0.2px;
+}
+
+.field {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+input[type="file"],
+textarea {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(11, 18, 32, 0.65);
+  color: var(--text);
+  padding: 10px;
+  outline: none;
+}
+
+textarea {
+  font-family: var(--sans);
+  resize: vertical;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: rgba(11, 18, 32, 0.6);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.btn.primary {
+  border-color: rgba(79, 124, 255, 0.6);
+  background: linear-gradient(180deg, rgba(79, 124, 255, 0.95), rgba(79, 124, 255, 0.65));
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.meta {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(147, 164, 199, 0.85);
+}
+
+.box {
+  margin: 0;
+  padding: 10px;
+  min-height: 140px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(11, 18, 32, 0.55);
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.evt {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(11, 18, 32, 0.55);
+  padding: 10px;
+}
+
+.evt .k {
+  font-size: 12px;
+  color: rgba(233, 240, 255, 0.9);
+  font-weight: 650;
+}
+
+.evt .v {
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: rgba(233, 240, 255, 0.88);
+  white-space: pre-wrap;
+}
+
+.evt.error {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-card {
+  width: min(720px, 100%);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(17, 26, 46, 0.92);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  padding: 14px;
+}
+
+.modal-title {
+  font-weight: 750;
+}
+
+.modal-body {
+  margin-top: 10px;
+  color: rgba(233, 240, 255, 0.92);
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(11, 18, 32, 0.5);
+}
+
+.modal-form {
+  margin-top: 12px;
+}
+
+.modal-form input[type="text"],
+.modal-form textarea,
+.modal-form select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(11, 18, 32, 0.65);
+  color: var(--text);
+  padding: 10px;
+  outline: none;
+  font-family: var(--mono);
+}
+

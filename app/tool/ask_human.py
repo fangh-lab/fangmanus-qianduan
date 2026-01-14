@@ -1,0 +1,23 @@
+from app.tool import BaseTool
+from app.human_io import get_human_io
+
+
+class AskHuman(BaseTool):
+    """Add a tool to ask human for help."""
+
+    name: str = "ask_human"
+    description: str = "Use this tool to ask human for help."
+    parameters: str = {
+        "type": "object",
+        "properties": {
+            "inquire": {
+                "type": "string",
+                "description": "The question you want to ask human.",
+            }
+        },
+        "required": ["inquire"],
+    }
+
+    async def execute(self, inquire: str) -> str:
+        # Delegate to pluggable HumanIO (CLI uses input(), Web waits for frontend response)
+        return (await get_human_io().feedback(f"Bot: {inquire}\n\nYou", allow_empty=False)).strip()

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Manus Web UI</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="title">Manus Web UI</div>
+        <div class="subtitle">上传文件 + 输入提示词 + 实时查看计划与每步结果</div>
+      </header>
+
+      <main class="grid">
+        <section class="panel">
+          <h2>输入</h2>
+
+          <label class="field">
+            <div class="label">Planning 模板（可选）</div>
+            <input id="planningTemplate" type="file" />
+          </label>
+
+          <label class="field">
+            <div class="label">业务文件（可多选，可选）</div>
+            <input id="businessFiles" type="file" multiple />
+            <div id="fileList" class="hint"></div>
+          </label>
+
+          <label class="field">
+            <div class="label">提示词 Prompt</div>
+            <textarea id="prompt" rows="8" placeholder="请输入你的需求..."></textarea>
+          </label>
+
+          <div class="row">
+            <button id="startBtn" class="btn primary">开始执行</button>
+            <button id="clearBtn" class="btn">清空输出</button>
+          </div>
+
+          <div class="meta">
+            <div>Session: <span id="sessionId">-</span></div>
+            <div>Status: <span id="status">idle</span></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>计划 / 步骤</h2>
+          <pre id="planBox" class="box"></pre>
+
+          <h2 style="margin-top: 16px;">事件流</h2>
+          <div id="events" class="events"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-title" id="modalTitle">需要你的输入</div>
+        <div class="modal-body" id="modalBody"></div>
+        <form id="modalForm" class="modal-form">
+          <input id="modalRequestId" type="hidden" />
+          <div id="modalControls"></div>
+          <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+            <button type="submit" class="btn primary">提交</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+

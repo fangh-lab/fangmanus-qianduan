@@ -1,0 +1,1 @@
+Checking parent directory structure of OpenManus project.
