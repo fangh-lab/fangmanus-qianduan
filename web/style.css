@@ -188,27 +188,28 @@ textarea {
   border-color: rgba(239, 68, 68, 0.5);
 }
 
-.modal {
+.drawer {
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  top: 14px;
+  right: 14px;
+  width: min(460px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
+  z-index: 50;
 }
 
-.modal.hidden {
+.drawer.hidden {
   display: none;
 }
 
-.modal-card {
-  width: min(720px, 100%);
+.drawer-card {
+  width: 100%;
   border-radius: 14px;
   border: 1px solid var(--border);
-  background: rgba(17, 26, 46, 0.92);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  background: rgba(17, 26, 46, 0.94);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
   padding: 14px;
+  overflow: auto;
 }
 
 .modal-title {
@@ -245,3 +246,26 @@ textarea {
   font-family: var(--mono);
 }
 
+.drawer-details {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(11, 18, 32, 0.45);
+  padding: 8px 10px;
+}
+
+.drawer-details summary {
+  cursor: pointer;
+  color: rgba(233, 240, 255, 0.9);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.drawer-pre {
+  margin: 8px 0 0 0;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(233, 240, 255, 0.88);
+}

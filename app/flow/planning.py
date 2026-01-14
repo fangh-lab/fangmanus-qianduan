@@ -584,7 +584,7 @@ class PlanningFlow(BaseFlow):
                 print("-" * 80)
 
                 choice = await get_human_io().choose(
-                    "\nEnter your choice",
+                    "\n你选择了【不接受】当前计划。\n请选择下一步操作：\n1 = 提供反馈，让系统修改计划（推荐）\n2 = 取消并退出\n请输入 1 或 2",
                     choices=["1", "2"],
                     default="1",
                 )
@@ -778,7 +778,7 @@ class PlanningFlow(BaseFlow):
                 print("-" * 80)
 
                 choice = await get_human_io().choose(
-                    "\nEnter your choice",
+                    "\n你选择了【不接受】当前步骤结果。\n请选择下一步操作：\n1 = 提供纠正/反馈（会记录到 notes/记忆，便于后续步骤参考）\n2 = 标记该步骤为阻塞/需要重新执行\n3 = 接受当前结果并继续（可选填写备注）\n请输入 1 / 2 / 3",
                     choices=["1", "2", "3"],
                     default="1",
                 )

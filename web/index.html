@@ -45,8 +45,11 @@
         </section>
 
         <section class="panel">
-          <h2>计划 / 步骤</h2>
+          <h2>计划</h2>
           <pre id="planBox" class="box"></pre>
+
+          <h2 style="margin-top: 16px;">当前步骤结果（便于核查/复制）</h2>
+          <pre id="stepResultBox" class="box"></pre>
 
           <h2 style="margin-top: 16px;">事件流</h2>
           <div id="events" class="events"></div>
@@ -54,14 +57,23 @@
       </main>
     </div>
 
-    <div id="modal" class="modal hidden">
-      <div class="modal-card">
+    <div id="modal" class="drawer hidden">
+      <div class="drawer-card">
         <div class="modal-title" id="modalTitle">需要你的输入</div>
         <div class="modal-body" id="modalBody"></div>
+        <details class="drawer-details" open>
+          <summary>当前计划（折叠/展开）</summary>
+          <pre id="modalPlan" class="drawer-pre"></pre>
+        </details>
+        <details class="drawer-details" open>
+          <summary>最近步骤结果（折叠/展开）</summary>
+          <pre id="modalStepResult" class="drawer-pre"></pre>
+        </details>
         <form id="modalForm" class="modal-form">
           <input id="modalRequestId" type="hidden" />
           <div id="modalControls"></div>
           <div class="row" style="justify-content: flex-end; margin-top: 12px;">
+            <button type="button" id="modalMinBtn" class="btn">最小化</button>
             <button type="submit" class="btn primary">提交</button>
           </div>
         </form>

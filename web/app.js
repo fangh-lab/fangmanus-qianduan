@@ -2,6 +2,9 @@ const el = (id) => document.getElementById(id);
 
 let currentSessionId = null;
 let es = null;
+let lastPlanText = "";
+let lastStepResult = "";
+let drawerMinimized = false;
 
 function setStatus(s) {
   el("status").textContent = s;
@@ -23,9 +26,12 @@ function addEventCard(type, payload) {
 
 function showModal(req) {
   el("modal").classList.remove("hidden");
+  drawerMinimized = false;
   el("modalRequestId").value = req.request_id;
   el("modalTitle").textContent = "需要你的输入";
   el("modalBody").textContent = req.prompt || "";
+  el("modalPlan").textContent = lastPlanText || "";
+  el("modalStepResult").textContent = lastStepResult || "";
 
   const controls = el("modalControls");
   controls.innerHTML = "";
@@ -101,11 +107,17 @@ async function startRun() {
   es.addEventListener("run_start", (e) => addEventCard("run_start", JSON.parse(e.data)));
   es.addEventListener("plan", (e) => {
     const p = JSON.parse(e.data);
-    el("planBox").textContent = p.text || "";
+    lastPlanText = p.text || "";
+    el("planBox").textContent = lastPlanText;
     addEventCard("plan", p);
   });
   es.addEventListener("step_start", (e) => addEventCard("step_start", JSON.parse(e.data)));
-  es.addEventListener("step_end", (e) => addEventCard("step_end", JSON.parse(e.data)));
+  es.addEventListener("step_end", (e) => {
+    const payload = JSON.parse(e.data);
+    lastStepResult = payload.result || "";
+    el("stepResultBox").textContent = lastStepResult;
+    addEventCard("step_end", payload);
+  });
   es.addEventListener("text", (e) => addEventCard("text", JSON.parse(e.data)));
   es.addEventListener("human_request", (e) => {
     const req = JSON.parse(e.data);
@@ -166,3 +178,33 @@ el("modalForm").addEventListener("submit", async (evt) => {
   hideModal();
 });
 
+el("modalMinBtn").addEventListener("click", () => {
+  // 仅最小化抽屉内容，不影响主界面查看计划/结果
+  drawerMinimized = !drawerMinimized;
+  const body = el("modalBody");
+  const form = el("modalForm");
+  const details = Array.from(document.querySelectorAll(".drawer-details"));
+  if (drawerMinimized) {
+    body.style.display = "none";
+    details.forEach((d) => (d.style.display = "none"));
+    form.style.display = "none";
+    el("modalTitle").textContent = "需要你的输入（已最小化，点击展开）";
+    el("modal").addEventListener(
+      "click",
+      () => {
+        if (!drawerMinimized) return;
+        drawerMinimized = false;
+        body.style.display = "";
+        details.forEach((d) => (d.style.display = ""));
+        form.style.display = "";
+        el("modalTitle").textContent = "需要你的输入";
+      },
+      { once: true }
+    );
+  } else {
+    body.style.display = "";
+    details.forEach((d) => (d.style.display = ""));
+    form.style.display = "";
+    el("modalTitle").textContent = "需要你的输入";
+  }
+});
