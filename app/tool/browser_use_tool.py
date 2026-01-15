@@ -12,6 +12,7 @@ from pydantic_core.core_schema import ValidationInfo
 
 from app.config import config
 from app.llm import LLM
+from app.logger import logger
 from app.tool.base import BaseTool, ToolResult
 from app.tool.web_search import WebSearch
 
@@ -169,7 +170,68 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                         if not isinstance(value, list) or value:
                             browser_config_kwargs[attr] = value
 
-            self.browser = BrowserUseBrowser(BrowserConfig(**browser_config_kwargs))
+            # 如果只配置了 chrome_instance_path 但没有配置 cdp_url 或 wss_url
+            # 说明用户想使用指定的浏览器路径启动新实例，而不是连接现有实例
+            # browser_use 库可能会尝试连接现有实例，所以我们需要确保它启动新实例
+            # 方法：添加额外的参数来强制启动新实例，或者使用 executable_path 而不是 chrome_instance_path
+            chrome_path = browser_config_kwargs.get("chrome_instance_path")
+            has_cdp = "cdp_url" in browser_config_kwargs or "wss_url" in browser_config_kwargs
+
+            if chrome_path and not has_cdp:
+                # 只配置了 chrome_instance_path，没有配置连接 URL
+                # 这意味着要启动新实例，而不是连接现有实例
+                # 使用 executable_path 参数（如果 browser_use 支持）或者移除 chrome_instance_path 让 Playwright 自动启动
+                logger.info(f"Browser instance path configured: {chrome_path}")
+                logger.info("Will start a new browser instance (not connecting to existing one)")
+                # 确保不设置 cdp_url/wss_url，让工具启动新实例
+                # browser_use 库应该会自动使用 chrome_instance_path 启动新实例
+                # 如果仍然尝试连接，可能需要使用不同的配置方式
+            elif chrome_path and has_cdp:
+                # 同时配置了 chrome_instance_path 和 cdp_url/wss_url
+                # 这意味着要连接到现有实例
+                logger.info("Connecting to existing browser instance via CDP/WSS")
+            elif "cdp_url" not in browser_config_kwargs and "wss_url" not in browser_config_kwargs:
+                # 没有配置任何浏览器相关参数，让 browser_use 自动启动浏览器
+                logger.info("No browser config specified, will auto-start browser")
+
+            try:
+                self.browser = BrowserUseBrowser(BrowserConfig(**browser_config_kwargs))
+            except Exception as e:
+                error_msg = str(e)
+                # 如果是连接错误，且只配置了 chrome_instance_path（没有 cdp_url/wss_url）
+                # 尝试移除 chrome_instance_path，让 Playwright 自动启动浏览器
+                if ("ECONNREFUSED" in error_msg or "connect" in error_msg.lower() or "Debug mode" in error_msg) and \
+                   "chrome_instance_path" in browser_config_kwargs and \
+                   "cdp_url" not in browser_config_kwargs and "wss_url" not in browser_config_kwargs:
+                    logger.warning(f"Browser connection failed with chrome_instance_path, trying without it: {error_msg}")
+                    # 移除 chrome_instance_path，让 Playwright 自动启动浏览器
+                    fallback_config = browser_config_kwargs.copy()
+                    fallback_config.pop("chrome_instance_path", None)
+                    try:
+                        logger.info("Retrying browser initialization without chrome_instance_path (auto-start)")
+                        self.browser = BrowserUseBrowser(BrowserConfig(**fallback_config))
+                        logger.info("Successfully started browser without chrome_instance_path")
+                    except Exception as e2:
+                        # 如果还是失败，提供友好的错误信息
+                        raise RuntimeError(
+                            f"浏览器启动失败: {str(e2)}\n"
+                            f"原始错误: {error_msg}\n"
+                            f"解决方案:\n"
+                            f"1. 关闭所有正在运行的 Chrome/Edge 浏览器实例，然后重试\n"
+                            f"2. 或者使用 web_search 工具作为替代方案（不需要浏览器）\n"
+                            f"3. 如果必须使用浏览器，请确保 Playwright 已正确安装"
+                        ) from e2
+                else:
+                    # 其他错误，提供友好的错误信息
+                    if "ECONNREFUSED" in error_msg or "connect" in error_msg.lower() or "Debug mode" in error_msg:
+                        raise RuntimeError(
+                            f"浏览器连接失败: {error_msg}\n"
+                            f"解决方案:\n"
+                            f"1. 关闭所有正在运行的 Chrome/Edge 浏览器实例\n"
+                            f"2. 或者让工具自动启动浏览器（不配置 cdp_url/wss_url）\n"
+                            f"3. 如果必须使用现有浏览器，请以调试模式启动: msedge.exe --remote-debugging-port=9222"
+                        ) from e
+                    raise
 
         if self.context is None:
             context_config = BrowserContextConfig()
@@ -487,6 +549,17 @@ Page content:
                     return ToolResult(error=f"Unknown action: {action}")
 
             except Exception as e:
+                error_msg = str(e)
+                # 如果是浏览器连接错误，提供更友好的错误信息和建议
+                if "ECONNREFUSED" in error_msg or "connect" in error_msg.lower() or "Debug mode" in error_msg or "9222" in error_msg:
+                    friendly_error = (
+                        f"浏览器连接失败: {error_msg}\n\n"
+                        f"建议:\n"
+                        f"1. 关闭所有正在运行的 Chrome/Edge 浏览器实例，然后重试\n"
+                        f"2. 或者使用 web_search 工具作为替代方案（不需要浏览器）\n"
+                        f"3. 如果必须使用浏览器，请确保浏览器以调试模式启动"
+                    )
+                    return ToolResult(error=friendly_error)
                 return ToolResult(error=f"Browser action '{action}' failed: {str(e)}")
 
     async def get_current_state(

@@ -125,8 +125,14 @@ class BaseAgent(BaseModel, ABC):
         Raises:
             RuntimeError: If the agent is not in IDLE state at start.
         """
+        # 重置状态，确保每次 run() 都从干净的状态开始
+        # 无论当前状态如何，都重置为初始状态
+        logger.info(f"[AGENT] Resetting agent state before run: current_step={self.current_step}, state={self.state}")
+        self.current_step = 0  # 总是重置步骤计数
         if self.state != AgentState.IDLE:
-            raise RuntimeError(f"Cannot run agent from state: {self.state}")
+            logger.warning(f"Agent state is {self.state}, resetting to IDLE")
+            self.state = AgentState.IDLE
+        logger.info(f"[AGENT] Agent state after reset: current_step={self.current_step}, state={self.state}")
 
         if request:
             self.update_memory("user", request)
@@ -153,19 +159,55 @@ class BaseAgent(BaseModel, ABC):
                 if self.is_stuck():
                     self.handle_stuck_state()
 
-            # 如果达到最大步数但未完成，返回最后一步的结果和摘要
-            if self.current_step >= self.max_steps and self.state != AgentState.FINISHED:
-                self.current_step = 0
+            # 处理完成或达到最大步数的情况
+            # 保存完成状态，因为后面会重置状态
+            was_finished = (self.state == AgentState.FINISHED)
+            steps_taken = self.current_step
+
+            if was_finished:
+                # Agent 明确标记任务已完成
+                logger.info(f"[AGENT] Task completed successfully after {steps_taken} steps")
+
+                # 优先从 memory 中提取最后的 assistant message（通常包含总结）
+                # 如果最后一条 assistant message 包含总结性内容，使用它作为结果
+                final_result = last_step_result if last_step_result else "任务执行完成。"
+
+                # 尝试从 memory 中获取最后的思考内容
+                if hasattr(self, 'memory') and self.memory and hasattr(self.memory, 'messages'):
+                    # 从后往前查找 assistant message
+                    for msg in reversed(self.memory.messages):
+                        if hasattr(msg, 'role') and msg.role == 'assistant' and hasattr(msg, 'content'):
+                            content = msg.content or ""
+                            # 如果内容包含总结性关键词且长度足够，使用它
+                            if len(content) > 100 and any(keyword in content for keyword in ["总结", "完成", "已经", "收集", "获取", "##", "###", "GitHub", "功能"]):
+                                final_result = content
+                                logger.info(f"[AGENT] Using final assistant message as result (length: {len(content)})")
+                                break
+
+                # 在结果前添加完成标记，方便后续识别
+                result = f"[AGENT_COMPLETED:100%:steps={steps_taken}]\n{final_result}"
                 self.state = AgentState.IDLE
-                # 返回最后一步的结果，这样第二步可以基于这个结果继续
+            elif self.current_step >= self.max_steps:
+                # 达到最大步数但未完成 - 需要人类决定是否继续
+                logger.warning(f"[AGENT] Reached max_steps ({self.max_steps}) but task not finished. State: {self.state}")
+                self.state = AgentState.IDLE
                 if last_step_result:
                     summary_text = "\n".join(all_step_results[-3:]) if all_step_results else ""  # 只显示最后3步
-                    return f"[执行了 {self.max_steps} 步，当前结果]:\n{last_step_result}\n\n[执行摘要]:\n{summary_text}"
+                    result = f"[AGENT_INCOMPLETE:steps={self.max_steps}/{self.max_steps}]\n[⚠️ 达到最大步数 {self.max_steps}，任务可能未完全完成]:\n{last_step_result}\n\n[执行摘要]:\n{summary_text}\n\n[提示]：如果任务未完成，请与人类交互后决定是否继续执行。"
                 else:
-                    return f"[执行了 {self.max_steps} 步，但未产生明确结果。请检查任务是否过于复杂，或增加最大步数。]"
+                    result = f"[AGENT_INCOMPLETE:steps={self.max_steps}/{self.max_steps}]\n[⚠️ 达到最大步数 {self.max_steps}，但未产生明确结果。请检查任务是否过于复杂，或增加最大步数。]"
+            else:
+                # 正常完成（理论上不应该到这里，因为如果完成应该是 FINISHED 状态）
+                logger.warning(f"[AGENT] Unexpected state: current_step={self.current_step}, max_steps={self.max_steps}, state={self.state}")
+                result = last_step_result if last_step_result else "任务执行完成，但未产生明确结果。"
+                # 标记为可能完成，但不确定
+                result = f"[AGENT_UNCERTAIN:steps={self.current_step}/{self.max_steps}]\n{result}"
+                self.state = AgentState.IDLE
+
         await SANDBOX_CLIENT.cleanup()
-        # 如果正常完成，返回最后一步的结果
-        return last_step_result if last_step_result else "任务执行完成，但未产生明确结果。"
+        # 重置 current_step，为下次执行做准备
+        self.current_step = 0
+        return result
 
     @abstractmethod
     async def step(self) -> str:

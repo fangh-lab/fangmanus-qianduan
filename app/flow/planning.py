@@ -160,6 +160,8 @@ class PlanningFlow(BaseFlow):
                 logger.info(f"[PLANNING FLOW] Step {self.current_step_index} execution returned. Result type: {type(step_result)}, Length: {len(str(step_result)) if step_result else 0}")
 
                 result += step_result + "\n"
+
+                # 发送 step_end 事件
                 await get_human_io().emit(
                     {
                         "type": "step_end",
@@ -168,6 +170,7 @@ class PlanningFlow(BaseFlow):
                         "result": str(step_result) if step_result is not None else "",
                     }
                 )
+                logger.info(f"[PLANNING FLOW] Step {self.current_step_index} step_end event emitted")
 
                 # Human feedback: confirm step result before continuing
                 # Force flush before human interaction
@@ -180,30 +183,58 @@ class PlanningFlow(BaseFlow):
                 print(f"\n[DEBUG] Step {self.current_step_index} completed. Preparing for human feedback...")
                 sys.stdout.flush()
 
+                # 确保步骤确认不会永久卡住，添加超时保护
                 try:
-                    should_continue = await self._confirm_step_result(str(step_result) if step_result else "[No result]")
+                    import asyncio
+                    logger.info(f"[PLANNING FLOW] Calling _confirm_step_result for step {self.current_step_index} with timeout 600s")
+                    should_continue = await asyncio.wait_for(
+                        self._confirm_step_result(str(step_result) if step_result else "[No result]"),
+                        timeout=600.0  # 10分钟超时，避免永久卡住
+                    )
                     logger.info(f"[PLANNING FLOW] Step {self.current_step_index} confirmation completed. Result: {should_continue}")
                     if not should_continue:
                         logger.info("Step execution cancelled by user. Stopping execution.")
                         result += "\n[Execution stopped by user feedback]"
                         break
+                except asyncio.TimeoutError:
+                    logger.warning(f"[PLANNING FLOW] Step {self.current_step_index} confirmation timed out after 10 minutes, defaulting to continue")
+                    should_continue = True  # 超时默认继续，避免卡住
+                    await get_human_io().emit({
+                        "type": "error",
+                        "message": f"步骤 {self.current_step_index} 确认超时，将自动继续执行下一步"
+                    })
                 except Exception as e:
                     logger.error(f"[PLANNING FLOW] Error in step result confirmation for step {self.current_step_index}: {e}", exc_info=True)
                     import traceback
                     traceback.print_exc()
-                    # Ask user if they want to continue despite the error
-                    print(f"\n[ERROR] Exception during step {self.current_step_index} confirmation: {e}")
-                    sys.stdout.flush()
-                    should_continue = await ask_human_confirmation(
-                        f"\nError during step {self.current_step_index} result confirmation. Do you want to continue?",
-                        default="y",
-                    )
-                    if not should_continue:
-                        result += "\n[Execution stopped by user]"
-                        break
+                    # 错误时默认继续，避免卡住整个流程
+                    should_continue = True
+                    await get_human_io().emit({
+                        "type": "error",
+                        "message": f"步骤 {self.current_step_index} 确认过程中出现错误: {str(e)}，将继续执行下一步"
+                    })
 
-                # Check if agent wants to terminate
-                if hasattr(executor, "state") and executor.state == AgentState.FINISHED:
+                logger.info(f"[PLANNING FLOW] Step {self.current_step_index} human feedback completed, should_continue={should_continue}")
+
+                # 如果用户选择继续，立即发送事件通知前端，然后继续下一个步骤
+                if should_continue:
+                    logger.info(f"[PLANNING FLOW] User confirmed step {self.current_step_index}, proceeding to next step")
+                    await get_human_io().emit({
+                        "type": "step_confirmed",
+                        "plan_id": self.active_plan_id,
+                        "step_index": self.current_step_index,
+                        "action": "continue"
+                    })
+                    # 继续循环，执行下一个步骤
+                    continue
+                else:
+                    logger.info(f"[PLANNING FLOW] User rejected step {self.current_step_index}, stopping execution")
+                    await get_human_io().emit({
+                        "type": "step_confirmed",
+                        "plan_id": self.active_plan_id,
+                        "step_index": self.current_step_index,
+                        "action": "stop"
+                    })
                     break
 
             return result
@@ -403,6 +434,15 @@ class PlanningFlow(BaseFlow):
 
     async def _execute_step(self, executor: BaseAgent, step_info: dict) -> str:
         """Execute the current step with the specified agent using agent.run()."""
+        # 重置 Agent 的状态，确保每个 planning step 都从 step 0 开始计数
+        # 强制重置，确保每次执行都从干净状态开始
+        if hasattr(executor, 'current_step'):
+            executor.current_step = 0
+            logger.info(f"[PLANNING FLOW] Reset agent current_step to 0 for step {self.current_step_index}")
+        if hasattr(executor, 'state'):
+            executor.state = AgentState.IDLE
+            logger.info(f"[PLANNING FLOW] Reset agent state to IDLE for step {self.current_step_index}")
+
         # Prepare context for the agent with current plan status
         plan_status = await self._get_plan_text()
         step_text = step_info.get("text", f"Step {self.current_step_index}")
@@ -415,20 +455,209 @@ class PlanningFlow(BaseFlow):
         YOUR CURRENT TASK:
         You are now working on step {self.current_step_index}: "{step_text}"
 
-        Please only execute this current step using the appropriate tools. When you're done, provide a summary of what you accomplished.
+        IMPORTANT INSTRUCTIONS:
+        1. You must complete this step 100% before marking it as finished.
+        2. Use the appropriate tools to accomplish the task fully.
+        3. When you have COMPLETELY finished this step (100% done), you MUST set your state to FINISHED to indicate completion.
+        4. Only mark as FINISHED when the step is truly complete - do not finish prematurely.
+        5. If you reach the maximum number of steps but the task is not complete, return a summary indicating what was accomplished and what remains.
+
+        When you're done, provide a CLEAR and USER-FRIENDLY summary of what you accomplished, focusing on the actual information extracted or actions completed, not technical implementation details.
+
+        Your final summary should be readable and meaningful to a human user, not just technical logs.
         """
 
         # Use agent.run() to execute the step
         try:
+            # 记录执行前的状态
+            initial_state = executor.state if hasattr(executor, 'state') else None
+            logger.info(f"[PLANNING FLOW] Starting execution of planning step {self.current_step_index}. Agent initial state: {initial_state}")
+
             step_result = await executor.run(step_prompt)
 
-            # Mark the step as completed after successful execution
+            # 从结果中提取完成状态信息（Agent在结果中标记了完成状态）
+            is_completed = False
+            steps_taken = 0
+            max_steps = executor.max_steps if hasattr(executor, 'max_steps') else 15
+
+            # 检查结果中是否包含完成标记
+            if step_result and "[AGENT_COMPLETED:" in step_result:
+                is_completed = True
+                # 提取步数信息
+                import re
+                match = re.search(r'\[AGENT_COMPLETED:100%:steps=(\d+)\]', step_result)
+                if match:
+                    steps_taken = int(match.group(1))
+                logger.info(f"[PLANNING FLOW] Planning step {self.current_step_index} completed successfully (100%) after {steps_taken} steps")
+            elif step_result and "[AGENT_INCOMPLETE:" in step_result:
+                is_completed = False
+                # 提取步数信息
+                import re
+                match = re.search(r'\[AGENT_INCOMPLETE:steps=(\d+)/(\d+)\]', step_result)
+                if match:
+                    steps_taken = int(match.group(1))
+                    max_steps = int(match.group(2))
+                logger.warning(f"[PLANNING FLOW] Planning step {self.current_step_index} may not be fully completed. Steps: {steps_taken}/{max_steps}")
+            else:
+                # 没有明确标记，假设完成（向后兼容）
+                is_completed = True
+                logger.info(f"[PLANNING FLOW] Planning step {self.current_step_index} execution completed (no explicit completion marker)")
+
+            # 优先从 Agent 的 memory 中提取最后的 assistant message（包含总结）
+            meaningful_result = None
+            if hasattr(executor, 'memory') and executor.memory and hasattr(executor.memory, 'messages'):
+                # 从后往前查找 assistant message
+                for msg in reversed(executor.memory.messages):
+                    if hasattr(msg, 'role') and msg.role == 'assistant' and hasattr(msg, 'content'):
+                        content = msg.content or ""
+                        # 如果内容包含总结性关键词且长度足够，使用它
+                        if len(content) > 100 and any(keyword in content for keyword in ["总结", "完成", "已经", "收集", "获取", "##", "###", "GitHub", "功能", "信息"]):
+                            meaningful_result = content
+                            logger.info(f"[PLANNING FLOW] Found meaningful result in agent memory (length: {len(content)})")
+                            break
+
+            # Clean up the result - extract meaningful content from technical logs
+            # 先移除完成状态标记，然后提取有意义的内容
+            cleaned_result = step_result
+            # 移除Agent添加的完成状态标记
+            import re
+            cleaned_result = re.sub(r'\[AGENT_(COMPLETED|INCOMPLETE|UNCERTAIN):[^\]]+\]\n?', '', cleaned_result)
+
+            # 如果从 memory 中找到了有意义的结果，优先使用它
+            if meaningful_result:
+                cleaned_result = meaningful_result
+            else:
+                # 否则从 step_result 中提取
+                cleaned_result = self._extract_meaningful_result(cleaned_result)
+
+            # 根据完成状态添加用户友好的标记
+            if is_completed:
+                # 任务完成，在结果中添加完成标记
+                cleaned_result = f"[✅ 步骤 {self.current_step_index} 已完成 100%]\n\n{cleaned_result}"
+            else:
+                # 任务可能未完成，在结果中添加警告
+                cleaned_result = f"[⚠️ 步骤 {self.current_step_index} 可能未完全完成（执行了 {steps_taken}/{max_steps} 步）]\n\n{cleaned_result}\n\n[提示]：如果任务未完成，请提供反馈或选择继续执行。"
+
+            # Mark the step as completed after execution (无论是否100%完成，都标记为完成，让人类决定是否继续)
             await self._mark_step_completed()
 
-            return step_result
+            return cleaned_result
         except Exception as e:
             logger.error(f"Error executing step {self.current_step_index}: {e}")
             return f"Error executing step {self.current_step_index}: {str(e)}"
+
+    def _extract_meaningful_result(self, raw_result: str) -> str:
+        """Extract meaningful content from technical tool output."""
+        if not raw_result:
+            return "[步骤执行完成，但未产生明确结果]"
+
+        import re
+        import json
+
+        # 优先查找包含总结性内容的部分（通常以 ## 或 ### 开头，包含"总结"、"完成"等关键词）
+        # 匹配格式：## 标题\n...内容... 或包含总结性关键词的长文本
+        summary_patterns = [
+            r'(##[^\n]+\n.*?)(?=\n\n|$)',
+            r'(###[^\n]+\n.*?)(?=\n\n|$)',
+            r'(.{200,}?(?:总结|完成|已经|收集|获取|功能|信息).{200,}?)(?=\n\n|$)',
+        ]
+
+        for pattern in summary_patterns:
+            matches = re.findall(pattern, raw_result, re.DOTALL | re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    match = match.strip()
+                    # 如果匹配的内容包含总结性关键词且长度足够
+                    if len(match) > 100 and any(keyword in match for keyword in ["总结", "完成", "已经", "收集", "获取", "##", "###", "GitHub", "功能", "信息"]):
+                        # 清理技术性前缀
+                        match = re.sub(r'^Observed output of cmd.*?executed:\s*', '', match, flags=re.IGNORECASE)
+                        match = re.sub(r'^The interaction has been completed.*?$', '', match, flags=re.IGNORECASE | re.MULTILINE)
+                        match = match.strip()
+                        if len(match) > 100:
+                            return match[:3000] + ("\n...(内容已截断)" if len(match) > 3000 else "")
+
+        # 其次查找提取的内容（浏览器工具提取的页面内容）
+        # 匹配格式：Extracted from page: {'text': '...', ...}
+        extracted_patterns = [
+            r"Extracted from page[:\s]*(\{.*?\})",
+            r"extracted_content[:\s]*(\{.*?\})",
+            r"'text':\s*'([^']{50,})'",  # 至少50字符的文本
+            r'"text":\s*"([^"]{50,})"',
+        ]
+
+        for pattern in extracted_patterns:
+            matches = re.findall(pattern, raw_result, re.DOTALL | re.IGNORECASE)
+            if matches:
+                for match in matches:
+                    try:
+                        # 尝试解析 JSON
+                        if match.startswith('{'):
+                            data = json.loads(match)
+                            if 'text' in data:
+                                text = data['text']
+                                # 如果文本太长，截取前1000字符
+                                if len(text) > 1000:
+                                    return text[:1000] + "\n...(内容已截断)"
+                                return text
+                            # 如果有其他有意义的内容
+                            if 'extracted_content' in data:
+                                content = data['extracted_content']
+                                if isinstance(content, dict) and 'text' in content:
+                                    return content['text'][:1000] if len(content['text']) > 1000 else content['text']
+                        else:
+                            # 直接返回匹配的文本
+                            if len(match) > 50:
+                                return match[:1000] + ("\n...(内容已截断)" if len(match) > 1000 else "")
+                    except json.JSONDecodeError:
+                        # JSON 解析失败，尝试直接提取文本
+                        if len(match) > 50:
+                            return match[:1000] + ("\n...(内容已截断)" if len(match) > 1000 else "")
+                    except Exception:
+                        pass
+
+        # 如果没有找到提取的内容，清理技术性日志
+        # 移除 "Observed output of cmd" 前缀
+        cleaned = re.sub(r"Observed output of cmd `[^`]+` executed:\s*", "", raw_result, flags=re.IGNORECASE)
+
+        # 移除重复的技术性日志
+        cleaned = re.sub(r"Scrolled (down|up) by \d+ pixels\s*\n?", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"The interaction has been completed with status: success\s*\n?", "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"Error: Browser action.*?failed.*?\n", "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r"ERROR\s+\[browser\].*?\n", "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+        cleaned = re.sub(r"WARNING\s+\[browser\].*?\n", "", cleaned, flags=re.IGNORECASE | re.MULTILINE)
+
+        # 查找有意义的内容行
+        lines = cleaned.split('\n')
+        meaningful_lines = []
+        skip_patterns = [
+            r'^Observed output',
+            r'^Scrolled',
+            r'^步骤 \d+:',
+            r'^\[执行了',
+        ]
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            # 跳过技术性日志
+            if any(re.match(pattern, line, re.IGNORECASE) for pattern in skip_patterns):
+                continue
+            # 保留有意义的内容
+            if len(line) > 20:
+                meaningful_lines.append(line)
+                if len('\n'.join(meaningful_lines)) > 1000:
+                    break
+
+        if meaningful_lines:
+            result = '\n'.join(meaningful_lines)
+            return result[:1000] + ("\n...(内容已截断)" if len(result) > 1000 else result)
+
+        # 如果还是没有找到有意义的内容，返回清理后的原始结果（截断）
+        if cleaned:
+            return cleaned[:500] + ("\n...(内容已截断，完整内容见事件日志)" if len(cleaned) > 500 else "")
+
+        return raw_result[:500] + ("\n...(内容已截断)" if len(raw_result) > 500 else raw_result)
 
     async def _mark_step_completed(self) -> None:
         """Mark the current step as completed."""
@@ -761,7 +990,7 @@ class PlanningFlow(BaseFlow):
 
             logger.info(f"[_confirm_step_result] About to ask user: Is this step result acceptable?")
 
-            # Emit step confirmation request to frontend
+            # Emit step confirmation request to frontend (for UI display only)
             step_info_text = step_info.get("text", str(step_info)) if isinstance(step_info, dict) else str(step_info) if step_info else "未知步骤"
             await get_human_io().emit(
                 {
@@ -773,11 +1002,39 @@ class PlanningFlow(BaseFlow):
                 }
             )
 
-            # Ask if result is acceptable
-            result_acceptable = await ask_human_confirmation(
-                f"\n步骤 {self.current_step_index} 执行完成。\n步骤内容: {step_info if step_info else '未知'}\n\n结果是否可接受？",
-                default="y"
-            )
+            # Ask if result is acceptable and whether to continue to next step (with timeout protection)
+            # This will create a proper human_request with request_id
+            try:
+                import asyncio
+                # 改进提示词，明确询问是否继续下一步
+                confirmation_prompt = f"""
+步骤 {self.current_step_index} 执行完成。
+
+步骤内容: {step_info_text}
+
+结果预览:
+{step_result[:500] + "..." if len(step_result) > 500 else step_result}
+
+请选择：
+- 输入 'y' 或 'yes'：接受当前结果并继续执行下一步
+- 输入 'n' 或 'no'：不接受当前结果，需要修改或反馈
+
+是否接受当前结果并继续下一步？"""
+
+                result_acceptable = await asyncio.wait_for(
+                    ask_human_confirmation(
+                        confirmation_prompt,
+                        default="y"
+                    ),
+                    timeout=600.0  # 10分钟超时，避免永久卡住
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Step {self.current_step_index} confirmation timed out, defaulting to continue")
+                result_acceptable = True  # 超时默认继续
+                await get_human_io().emit({
+                    "type": "error",
+                    "message": f"步骤 {self.current_step_index} 确认超时，将自动继续"
+                })
 
             if not result_acceptable:
                 # Result is not acceptable - offer modification options
@@ -834,28 +1091,19 @@ class PlanningFlow(BaseFlow):
                         # Store correction in memory and step notes
                         await self._store_step_correction(correction, step_result)
                         print("\n✓ Correction has been stored in memory and step notes.")
-                        return await ask_human_confirmation(
-                            "\nDo you want to continue to the next step?",
+                        # 提供反馈后，询问是否继续
+                        continue_after_feedback = await ask_human_confirmation(
+                            "\n反馈已记录。是否继续执行下一步？",
                             default="y"
                         )
+                        logger.info(f"[_confirm_step_result] User provided feedback, continue_after_feedback={continue_after_feedback}")
+                        return continue_after_feedback
 
             else:
-                # Result is acceptable - ask for optional feedback
-                feedback = await ask_human_feedback(
-                    "\nEnter any additional feedback or notes (optional, press Enter to skip):",
-                    allow_empty=True
-                )
-
-                if feedback:
-                    await self._store_step_feedback(feedback)
-
-            # Ask if user wants to continue
-            continue_execution = await ask_human_confirmation(
-                "\nDo you want to continue to the next step?",
-                default="y"
-            )
-
-            return continue_execution
+                # Result is acceptable - 用户已经选择了"接受并继续"，直接返回 True
+                # 不需要再询问是否继续，因为用户已经在第一步确认中选择了继续
+                logger.info(f"[_confirm_step_result] Step {self.current_step_index} result accepted, will continue to next step")
+                return True
         except Exception as e:
             logger.error(f"Error in step result confirmation: {e}")
             return await ask_human_confirmation(

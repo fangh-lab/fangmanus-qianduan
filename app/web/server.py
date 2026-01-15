@@ -141,9 +141,16 @@ def create_app(*, web_dir: str = "web") -> FastAPI:
         value: Annotated[str, Form(...)],
     ):
         session = get_session(session_id)
-        await session.resolve_human(request_id, value)
-        await session.emit({"type": "human_response", "request_id": request_id})
-        return {"ok": True}
+        logger.info(f"Received human response for request {request_id}: {value[:100] if value else 'None'}")
+        try:
+            await session.resolve_human(request_id, value)
+            await session.emit({"type": "human_response", "request_id": request_id, "value": value})
+            logger.info(f"Human response resolved for request {request_id}")
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"Error resolving human response: {e}", exc_info=True)
+            await session.emit({"type": "error", "message": f"Error processing human response: {str(e)}"})
+            return {"ok": False, "error": str(e)}
 
     return app
 

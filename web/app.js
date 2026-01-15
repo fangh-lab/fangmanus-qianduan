@@ -186,12 +186,15 @@ async function startRun() {
   es.addEventListener("human_timeout", (e) => addEventCard("human_timeout", JSON.parse(e.data)));
   es.addEventListener("step_confirmation_request", (e) => {
     const req = JSON.parse(e.data);
+    console.log("[FRONTEND] Received step_confirmation_request:", req);
     // 自动显示步骤确认弹窗
     const confirmReq = {
       kind: "confirm",
+      request_id: req.request_id || `step_confirm_${req.step_index}`,
       prompt: `步骤 ${req.step_index} 执行完成。\n步骤: ${req.step_info || '未知'}\n\n结果预览:\n${req.result_preview || ''}\n\n结果是否可接受？`,
       default: "y",
     };
+    console.log("[FRONTEND] Showing modal for step confirmation:", confirmReq);
     showModal(confirmReq);
   });
   es.addEventListener("run_end", (e) => {
@@ -231,19 +234,54 @@ el("clearBtn").addEventListener("click", () => {
 
 el("modalForm").addEventListener("submit", async (evt) => {
   evt.preventDefault();
-  if (!currentSessionId) return;
+  if (!currentSessionId) {
+    console.error("No session ID");
+    return;
+  }
   const requestId = el("modalRequestId").value;
+  if (!requestId) {
+    console.error("No request ID");
+    return;
+  }
   const valueEl = document.getElementById("modalValue");
   const value = valueEl ? valueEl.value : "";
 
-  const fd = new FormData();
-  fd.append("value", value);
-  await fetch(`/api/sessions/${currentSessionId}/human/${requestId}`, {
-    method: "POST",
-    body: fd,
-  });
+  // 禁用提交按钮，防止重复提交
+  const submitBtn = evt.target.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "提交中...";
+  }
 
-  hideModal();
+  try {
+    const fd = new FormData();
+    fd.append("value", value);
+
+    const response = await fetch(`/api/sessions/${currentSessionId}/human/${requestId}`, {
+      method: "POST",
+      body: fd,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server error: ${errorText}`);
+    }
+
+    const result = await response.json();
+    if (!result.ok) {
+      throw new Error(result.error || "Unknown error");
+    }
+
+    hideModal();
+  } catch (error) {
+    console.error("Error submitting human response:", error);
+    alert(`提交失败: ${error.message}`);
+    // 恢复按钮状态
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "提交";
+    }
+  }
 });
 
 el("modalMinBtn").addEventListener("click", () => {
