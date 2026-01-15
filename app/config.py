@@ -37,9 +37,9 @@ class ProxySettings(BaseModel):
 
 
 class SearchSettings(BaseModel):
-    engine: str = Field(default="Google", description="Search engine the llm to use")
+    engine: str = Field(default="Baidu", description="Search engine the llm to use")
     fallback_engines: List[str] = Field(
-        default_factory=lambda: ["DuckDuckGo", "Baidu", "Bing"],
+        default_factory=lambda: ["DuckDuckGo", "Bing", "Google"],
         description="Fallback search engines to try if the primary engine fails",
     )
     retry_delay: int = Field(
@@ -51,11 +51,11 @@ class SearchSettings(BaseModel):
         description="Maximum number of times to retry all engines when all fail",
     )
     lang: str = Field(
-        default="en",
+        default="zh",
         description="Language code for search results (e.g., en, zh, fr)",
     )
     country: str = Field(
-        default="us",
+        default="cn",
         description="Country code for search results (e.g., us, cn, uk)",
     )
 

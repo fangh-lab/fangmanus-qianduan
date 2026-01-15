@@ -235,10 +235,15 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                         return ToolResult(
                             error="URL is required for 'go_to_url' action"
                         )
-                    page = await context.get_current_page()
-                    await page.goto(url)
-                    await page.wait_for_load_state()
-                    return ToolResult(output=f"Navigated to {url}")
+                    try:
+                        page = await context.get_current_page()
+                        await asyncio.wait_for(page.goto(url), timeout=30.0)
+                        await asyncio.wait_for(page.wait_for_load_state(), timeout=10.0)
+                        return ToolResult(output=f"Navigated to {url}")
+                    except asyncio.TimeoutError:
+                        return ToolResult(error=f"Navigation to {url} timed out after 30 seconds")
+                    except Exception as e:
+                        return ToolResult(error=f"Navigation error: {str(e)}")
 
                 elif action == "go_back":
                     await context.go_back()
@@ -257,13 +262,21 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                     search_response = await self.web_search_tool.execute(
                         query=query, fetch_content=True, num_results=1
                     )
+                    if not search_response.results:
+                        return ToolResult(error="No search results found")
+
                     # Navigate to the first search result
                     first_search_result = search_response.results[0]
                     url_to_navigate = first_search_result.url
 
-                    page = await context.get_current_page()
-                    await page.goto(url_to_navigate)
-                    await page.wait_for_load_state()
+                    try:
+                        page = await context.get_current_page()
+                        await asyncio.wait_for(page.goto(url_to_navigate), timeout=30.0)
+                        await asyncio.wait_for(page.wait_for_load_state(), timeout=10.0)
+                    except asyncio.TimeoutError:
+                        return ToolResult(error=f"Navigation to search result timed out, but search results: {search_response.output}")
+                    except Exception as e:
+                        return ToolResult(error=f"Navigation error: {str(e)}, but search results: {search_response.output}")
 
                     return search_response
 

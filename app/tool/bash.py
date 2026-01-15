@@ -44,13 +44,23 @@ class _BashSession:
 
         self._started = True
 
-    def stop(self):
+    async def stop(self):
         """Terminate the bash shell."""
         if not self._started:
             raise ToolError("Session has not started.")
         if self._process.returncode is not None:
             return
-        self._process.terminate()
+        try:
+            self._process.terminate()
+            # Wait for process to terminate (important for Windows resource cleanup)
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                self._process.kill()
+                await self._process.wait()
+        except ProcessLookupError:
+            # Process already terminated
+            pass
 
     async def run(self, command: str):
         """Execute a command in the bash shell."""
@@ -136,7 +146,7 @@ class Bash(BaseTool):
     ) -> CLIResult:
         if restart:
             if self._session:
-                self._session.stop()
+                await self._session.stop()
             self._session = _BashSession()
             await self._session.start()
 

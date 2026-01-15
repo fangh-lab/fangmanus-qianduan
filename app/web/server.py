@@ -31,6 +31,7 @@ def create_app(*, web_dir: str = "web") -> FastAPI:
         planning_context: str,
         business_files: dict[str, str],
     ) -> None:
+        agents = {}
         try:
             set_human_io(WebHumanIO(session))
             await session.emit(
@@ -41,7 +42,7 @@ def create_app(*, web_dir: str = "web") -> FastAPI:
                 }
             )
 
-            agents = {"manus": Manus()}
+            agents["manus"] = Manus()
             if config.run_flow_config.use_data_analysis_agent:
                 agents["data_analysis"] = DataAnalysis()
 
@@ -55,6 +56,14 @@ def create_app(*, web_dir: str = "web") -> FastAPI:
         except Exception as e:
             logger.exception(f"Session {session.id} failed: {e}")
             await session.fail(str(e))
+        finally:
+            # Cleanup agents to ensure all subprocess resources are properly closed
+            for agent in agents.values():
+                try:
+                    if hasattr(agent, "cleanup"):
+                        await agent.cleanup()
+                except Exception as cleanup_error:
+                    logger.warning(f"Error cleaning up agent {type(agent).__name__}: {cleanup_error}")
 
     def get_session(session_id: str) -> Session:
         s = sessions.get(session_id)

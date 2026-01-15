@@ -13,6 +13,7 @@ from app.tool.browser_use_tool import BrowserUseTool
 from app.tool.mcp import MCPClients, MCPClientTool
 from app.tool.python_execute import PythonExecute
 from app.tool.str_replace_editor import StrReplaceEditor
+from app.tool.web_search import WebSearch
 
 
 class Manus(ToolCallAgent):
@@ -25,7 +26,8 @@ class Manus(ToolCallAgent):
     next_step_prompt: str = NEXT_STEP_PROMPT
 
     max_observe: int = 10000
-    max_steps: int = 20
+    # 适当增加推理步骤，确保复杂任务能完成，同时保持流畅度
+    max_steps: int = 15
 
     # MCP clients for remote tool access
     mcp_clients: MCPClients = Field(default_factory=MCPClients)
@@ -34,7 +36,8 @@ class Manus(ToolCallAgent):
     available_tools: ToolCollection = Field(
         default_factory=lambda: ToolCollection(
             PythonExecute(),
-            BrowserUseTool(),
+            WebSearch(),  # 轻量级 Web 搜索，优先使用（速度快、资源消耗低）
+            BrowserUseTool(),  # 浏览器自动化工具，用于需要交互的复杂网页操作
             StrReplaceEditor(),
             AskHuman(),
             Terminate(),

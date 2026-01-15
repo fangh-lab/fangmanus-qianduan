@@ -132,6 +132,9 @@ class BaseAgent(BaseModel, ABC):
             self.update_memory("user", request)
 
         results: List[str] = []
+        last_step_result = ""  # 保存最后一步的结果，用于返回
+        all_step_results = []  # 保存所有步骤的结果摘要
+
         async with self.state_context(AgentState.RUNNING):
             while (
                 self.current_step < self.max_steps and self.state != AgentState.FINISHED
@@ -139,19 +142,30 @@ class BaseAgent(BaseModel, ABC):
                 self.current_step += 1
                 logger.info(f"Executing step {self.current_step}/{self.max_steps}")
                 step_result = await self.step()
+                last_step_result = step_result  # 保存每一步的结果
+
+                # 提取步骤结果的关键信息（前200字符）
+                if step_result:
+                    summary = step_result[:200] + "..." if len(step_result) > 200 else step_result
+                    all_step_results.append(f"步骤 {self.current_step}: {summary}")
 
                 # Check for stuck state
                 if self.is_stuck():
                     self.handle_stuck_state()
 
-                results.append(f"Step {self.current_step}: {step_result}")
-
-            if self.current_step >= self.max_steps:
+            # 如果达到最大步数但未完成，返回最后一步的结果和摘要
+            if self.current_step >= self.max_steps and self.state != AgentState.FINISHED:
                 self.current_step = 0
                 self.state = AgentState.IDLE
-                results.append(f"Terminated: Reached max steps ({self.max_steps})")
+                # 返回最后一步的结果，这样第二步可以基于这个结果继续
+                if last_step_result:
+                    summary_text = "\n".join(all_step_results[-3:]) if all_step_results else ""  # 只显示最后3步
+                    return f"[执行了 {self.max_steps} 步，当前结果]:\n{last_step_result}\n\n[执行摘要]:\n{summary_text}"
+                else:
+                    return f"[执行了 {self.max_steps} 步，但未产生明确结果。请检查任务是否过于复杂，或增加最大步数。]"
         await SANDBOX_CLIENT.cleanup()
-        return "\n".join(results) if results else "No steps executed"
+        # 如果正常完成，返回最后一步的结果
+        return last_step_result if last_step_result else "任务执行完成，但未产生明确结果。"
 
     @abstractmethod
     async def step(self) -> str:

@@ -94,15 +94,30 @@ class LocalFileOperator(FileOperator):
             stdout, stderr = await asyncio.wait_for(
                 process.communicate(), timeout=timeout
             )
+            return_code = process.returncode or 0
+
+            # Ensure process is fully terminated (important for Windows)
+            if process.returncode is None:
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    try:
+                        process.kill()
+                        await process.wait()
+                    except Exception:
+                        pass
+
             return (
-                process.returncode or 0,
+                return_code,
                 self._decode_with_fallback(stdout),
                 self._decode_with_fallback(stderr),
             )
         except asyncio.TimeoutError as exc:
             try:
-                process.kill()
-            except ProcessLookupError:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+            except (ProcessLookupError, Exception):
                 pass
             raise TimeoutError(
                 f"Command '{cmd}' timed out after {timeout} seconds"

@@ -11,6 +11,12 @@ function setStatus(s) {
 }
 
 function addEventCard(type, payload) {
+  // 过滤掉中间推理过程，只显示关键事件
+  const skipTypes = ["text", "step_start"]; // 不显示这些中间过程
+  if (skipTypes.includes(type)) {
+    return; // 跳过中间推理过程的显示
+  }
+
   const wrap = document.createElement("div");
   wrap.className = "evt" + (type === "error" ? " error" : "");
   const k = document.createElement("div");
@@ -18,10 +24,42 @@ function addEventCard(type, payload) {
   k.textContent = type;
   const v = document.createElement("div");
   v.className = "v";
-  v.textContent = JSON.stringify(payload, null, 2);
+
+  // 对于 step_end，只显示最终结果摘要
+  if (type === "step_end" && payload.result) {
+    const result = payload.result;
+    // 提取最终结果（去掉中间过程）
+    const finalResult = extractFinalResult(result);
+    v.textContent = finalResult || result.substring(0, 500) + (result.length > 500 ? "..." : "");
+  } else {
+    v.textContent = JSON.stringify(payload, null, 2);
+  }
+
   wrap.appendChild(k);
   wrap.appendChild(v);
   el("events").prepend(wrap);
+}
+
+function extractFinalResult(resultText) {
+  // 尝试提取最终结果，去掉中间推理过程
+  // 查找常见的最终结果标记
+  const markers = [
+    /最终结果[：:]\s*(.+)/i,
+    /总结[：:]\s*(.+)/i,
+    /结论[：:]\s*(.+)/i,
+    /完成[：:]\s*(.+)/i,
+    /结果[：:]\s*(.+)/i,
+  ];
+
+  for (const marker of markers) {
+    const match = resultText.match(marker);
+    if (match) {
+      return match[1].trim();
+    }
+  }
+
+  // 如果没有找到标记，返回最后500字符（通常是最终结果）
+  return resultText.length > 500 ? resultText.substring(resultText.length - 500) : resultText;
 }
 
 function showModal(req) {
@@ -50,12 +88,30 @@ function showModal(req) {
     if ((req.default || "y").toLowerCase() === "n") sel.value = "n";
     controls.appendChild(sel);
   } else if (req.kind === "choice") {
+    // 创建选项说明
+    const desc = document.createElement("div");
+    desc.style.marginBottom = "10px";
+    desc.style.fontSize = "12px";
+    desc.style.color = "rgba(233, 240, 255, 0.8)";
+    desc.textContent = "请从以下选项中选择：";
+    controls.appendChild(desc);
+
     const sel = document.createElement("select");
     sel.id = "modalValue";
+    sel.style.width = "100%";
+    sel.style.marginBottom = "10px";
+
+    // 根据选项值显示更清晰的文本
+    const choiceLabels = {
+      "1": "1 - 提供纠正/反馈（会记录到 notes/记忆）",
+      "2": "2 - 标记该步骤为阻塞/需要重新执行",
+      "3": "3 - 接受当前结果并继续（可选填写备注）",
+    };
+
     (req.choices || []).forEach((c) => {
       const opt = document.createElement("option");
       opt.value = c;
-      opt.textContent = c;
+      opt.textContent = choiceLabels[c] || c;
       sel.appendChild(opt);
     });
     sel.value = req.default || (req.choices ? req.choices[0] : "");
@@ -115,7 +171,9 @@ async function startRun() {
   es.addEventListener("step_end", (e) => {
     const payload = JSON.parse(e.data);
     lastStepResult = payload.result || "";
-    el("stepResultBox").textContent = lastStepResult;
+    // 只显示最终结果摘要，不显示完整中间过程
+    const finalResult = extractFinalResult(lastStepResult);
+    el("stepResultBox").textContent = finalResult || lastStepResult.substring(0, 1000) + (lastStepResult.length > 1000 ? "\n...(结果已截断，完整内容见事件日志)" : "");
     addEventCard("step_end", payload);
   });
   es.addEventListener("text", (e) => addEventCard("text", JSON.parse(e.data)));
@@ -126,6 +184,16 @@ async function startRun() {
   });
   es.addEventListener("human_response", (e) => addEventCard("human_response", JSON.parse(e.data)));
   es.addEventListener("human_timeout", (e) => addEventCard("human_timeout", JSON.parse(e.data)));
+  es.addEventListener("step_confirmation_request", (e) => {
+    const req = JSON.parse(e.data);
+    // 自动显示步骤确认弹窗
+    const confirmReq = {
+      kind: "confirm",
+      prompt: `步骤 ${req.step_index} 执行完成。\n步骤: ${req.step_info || '未知'}\n\n结果预览:\n${req.result_preview || ''}\n\n结果是否可接受？`,
+      default: "y",
+    };
+    showModal(confirmReq);
+  });
   es.addEventListener("run_end", (e) => {
     const r = JSON.parse(e.data);
     addEventCard("run_end", r);

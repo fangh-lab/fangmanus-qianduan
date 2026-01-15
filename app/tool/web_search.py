@@ -219,31 +219,31 @@ class WebSearch(BaseTool):
         Returns:
             A structured response containing search results and metadata
         """
-        # Get settings from config
+        # Get settings from config (reduced defaults for faster failure)
         retry_delay = (
-            getattr(config.search_config, "retry_delay", 60)
+            getattr(config.search_config, "retry_delay", 5)
             if config.search_config
-            else 60
+            else 5
         )
         max_retries = (
-            getattr(config.search_config, "max_retries", 3)
+            getattr(config.search_config, "max_retries", 1)
             if config.search_config
-            else 3
+            else 1
         )
 
         # Use config values for lang and country if not specified
         if lang is None:
             lang = (
-                getattr(config.search_config, "lang", "en")
+                getattr(config.search_config, "lang", "zh")
                 if config.search_config
-                else "en"
+                else "zh"
             )
 
         if country is None:
             country = (
-                getattr(config.search_config, "country", "us")
+                getattr(config.search_config, "country", "cn")
                 if config.search_config
-                else "us"
+                else "cn"
             )
 
         search_params = {"lang": lang, "country": country}
@@ -297,11 +297,20 @@ class WebSearch(BaseTool):
         for engine_name in engine_order:
             engine = self._search_engine[engine_name]
             logger.info(f"🔎 Attempting search with {engine_name.capitalize()}...")
-            search_items = await self._perform_search_with_engine(
-                engine, query, num_results, search_params
-            )
+            try:
+                search_items = await self._perform_search_with_engine(
+                    engine, query, num_results, search_params
+                )
+            except Exception as e:
+                # Catch RetryError and other exceptions from search engines
+                logger.warning(
+                    f"Search engine {engine_name.capitalize()} failed: {type(e).__name__}: {str(e)}"
+                )
+                failed_engines.append(engine_name)
+                continue
 
             if not search_items:
+                failed_engines.append(engine_name)
                 continue
 
             if failed_engines:
@@ -360,15 +369,15 @@ class WebSearch(BaseTool):
     def _get_engine_order(self) -> List[str]:
         """Determines the order in which to try search engines."""
         preferred = (
-            getattr(config.search_config, "engine", "google").lower()
+            getattr(config.search_config, "engine", "baidu").lower()
             if config.search_config
-            else "google"
+            else "baidu"
         )
         fallbacks = (
             [engine.lower() for engine in config.search_config.fallback_engines]
             if config.search_config
             and hasattr(config.search_config, "fallback_engines")
-            else []
+            else ["duckduckgo", "bing", "google"]
         )
 
         # Start with preferred engine, then fallbacks, then remaining engines
@@ -385,7 +394,7 @@ class WebSearch(BaseTool):
         return engine_order
 
     @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10)
+        stop=stop_after_attempt(2), wait=wait_exponential(multiplier=0.5, min=0.5, max=3)
     )
     async def _perform_search_with_engine(
         self,
@@ -395,17 +404,24 @@ class WebSearch(BaseTool):
         search_params: Dict[str, Any],
     ) -> List[SearchItem]:
         """Execute search with the given engine and parameters."""
-        return await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: list(
-                engine.perform_search(
-                    query,
-                    num_results=num_results,
-                    lang=search_params.get("lang"),
-                    country=search_params.get("country"),
-                )
-            ),
-        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: list(
+                        engine.perform_search(
+                            query,
+                            num_results=num_results,
+                            lang=search_params.get("lang"),
+                            country=search_params.get("country"),
+                        )
+                    ),
+                ),
+                timeout=10.0,  # 10 second timeout per engine attempt
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Search engine timeout for query: {query[:50]}...")
+            return []
 
 
 if __name__ == "__main__":

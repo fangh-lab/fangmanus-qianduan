@@ -253,11 +253,32 @@ Outputs:
         input_json = json.dumps(vmind_params, ensure_ascii=False).encode("utf-8")
         try:
             stdout, stderr = await process.communicate(input_json)
-            stdout_str = stdout.decode("utf-8")
-            stderr_str = stderr.decode("utf-8")
+            stdout_str = stdout.decode("utf-8") if stdout else ""
+            stderr_str = stderr.decode("utf-8") if stderr else ""
+
+            # Ensure process is properly terminated and cleaned up
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    await process.wait()
+
             if process.returncode == 0:
                 return json.loads(stdout_str)
             else:
                 return {"error": f"Node.js Error: {stderr_str}"}
         except Exception as e:
+            # Ensure cleanup even on error
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=2.0)
+                except (asyncio.TimeoutError, Exception):
+                    try:
+                        process.kill()
+                        await process.wait()
+                    except Exception:
+                        pass
             return {"error": f"Subprocess Error: {str(e)}"}

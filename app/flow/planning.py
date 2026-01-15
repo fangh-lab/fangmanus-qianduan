@@ -761,9 +761,21 @@ class PlanningFlow(BaseFlow):
 
             logger.info(f"[_confirm_step_result] About to ask user: Is this step result acceptable?")
 
+            # Emit step confirmation request to frontend
+            step_info_text = step_info.get("text", str(step_info)) if isinstance(step_info, dict) else str(step_info) if step_info else "未知步骤"
+            await get_human_io().emit(
+                {
+                    "type": "step_confirmation_request",
+                    "plan_id": self.active_plan_id,
+                    "step_index": self.current_step_index,
+                    "step_info": step_info_text,
+                    "result_preview": step_result[:500] + "..." if len(step_result) > 500 else step_result,
+                }
+            )
+
             # Ask if result is acceptable
             result_acceptable = await ask_human_confirmation(
-                "\nIs this step result acceptable?",
+                f"\n步骤 {self.current_step_index} 执行完成。\n步骤内容: {step_info if step_info else '未知'}\n\n结果是否可接受？",
                 default="y"
             )
 
@@ -778,7 +790,7 @@ class PlanningFlow(BaseFlow):
                 print("-" * 80)
 
                 choice = await get_human_io().choose(
-                    "\n你选择了【不接受】当前步骤结果。\n请选择下一步操作：\n1 = 提供纠正/反馈（会记录到 notes/记忆，便于后续步骤参考）\n2 = 标记该步骤为阻塞/需要重新执行\n3 = 接受当前结果并继续（可选填写备注）\n请输入 1 / 2 / 3",
+                    "\n你选择了【不接受】当前步骤结果。\n\n请选择下一步操作：\n\n1 = 提供纠正/反馈（会记录到 notes/记忆，便于后续步骤参考）\n2 = 标记该步骤为阻塞/需要重新执行\n3 = 接受当前结果并继续（可选填写备注）\n\n请输入选项编号：",
                     choices=["1", "2", "3"],
                     default="1",
                 )

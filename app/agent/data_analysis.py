@@ -24,7 +24,8 @@ class DataAnalysis(ToolCallAgent):
     next_step_prompt: str = NEXT_STEP_PROMPT
 
     max_observe: int = 15000
-    max_steps: int = 20
+    # 压缩推理步骤到10步以内，提升流畅度
+    max_steps: int = 10
 
     # Add general-purpose tools to the tool collection
     available_tools: ToolCollection = Field(
